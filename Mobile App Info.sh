@@ -1,0 +1,168 @@
+#!/bin/bash
+
+######################################################################################################################################
+# 
+######################################################################################################################################
+# Nicholas McDonald 
+# Created on 06/19/2018 
+# v1.1
+# This script is desinged to ask the end user for Jamf Pro URL and credentials, then runs through all avaliable Mobile Apps and 
+# determines their scope and outputs this info to a log file that automatically opens while the script runs. 
+#
+#MIT License
+#
+#Copyright (c) 2018 Nicholas McDonald 
+#
+#Permission is hereby granted, free of charge, to any person obtaining a copy
+#of this software and associated documentation files (the "Software"), to deal
+#in the Software without restriction, including without limitation the rights
+#to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#copies of the Software, and to permit persons to whom the Software is
+#furnished to do so, subject to the following conditions:
+#
+#The above copyright notice and this permission notice shall be included in all
+#copies or substantial portions of the Software.
+#
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#SOFTWARE. 
+##
+######################################################################################################################################
+# 
+######################################################################################################################################
+
+jssurl=$(/usr/bin/osascript<<END
+tell application "System Events"
+activate
+set the answer to text returned of (display dialog "Your Jamf Pro URL including https://" default answer "https://CHANGEME.jamfcloud.com" buttons {"Continue"})
+end tell
+END)
+
+apiuser=$(/usr/bin/osascript<<END
+tell application "System Events"
+activate
+set the answer to text returned of (display dialog "Enter your Jamf Pro Username" default answer "" buttons {"Continue"})
+end tell
+END)
+
+apipass=$(/usr/bin/osascript<<END
+tell application "System Events"
+activate
+set the answer to text returned of (display dialog "Your Jamf Pro Password" default answer "" buttons {"Continue"} with hidden answer)
+end tell
+END)
+
+# Sets the variable of date to the current time in POSIX time. 
+date=$(date +%s)
+
+# Gets the logged in user
+loggedinuser=$(stat -f%Su /dev/console)
+
+# Sets the locaiton of the CSV file for the output 
+csvfile="/Users/$loggedinuser/Desktop/$date-applist.csv"
+
+#Checks Auth by looking at activation code 
+checkauth=$(curl -w '%{http_code}' -su "${apiuser}:${apipass}" -H "Accept: text/xml" "${jssurl}/JSSResource/activationcode")
+
+#Checks if credentials are authorized
+authstatus=$(echo "$checkauth" | sed 's/.*\(...\)/\1/' 2>/dev/null)
+
+#Curls down the entire Mobile Device Application catalog from the Jamf Pro Server
+rawapplist=$(curl -H "Accept: text/xml" -sfku "${apiuser}:${apipass}" "${jssurl}/JSSResource/mobiledeviceapplications")
+
+if [[ "$authstatus" = "200" ]]; then
+	echo "User permissions verified, colleting information. Please wait."	
+
+		#This xpaths out the ID's of all apps to be loaded into the array 
+		xpathed=$(echo "$rawapplist" | xpath /mobile_device_applications/mobile_device_application/id 2>/dev/null)
+
+		#This sets the array and cleans the data
+		ids=$(echo "$xpathed" | sed 's$</id>$ $g' | sed 's$<id>$$g')
+
+		#This line sets the header row for the CSV File 
+		echo "Application Name,Scoped to all devices?,Scoped to all users?,Targeted Mobile Devices,Targeted Mobile Device Groups,Targeted Jamf User Groups,Targeted Users,Targeted Buildings,Targeted Departments,Limited Users,Limited Network Segments,Limited LDAP User Groups,Excluded Mobile Devices,Excluded Mobile Device Groups,Excluded User Groups,Excluded Users,Excluded Buildings,Excluded Departments,Excluded Network Segments,Excluded Local Users,Excluded LDAP Groups" >> $csvfile
+
+		#This loops through all ID's in the Array 
+		for id in ${ids[*]}
+		do
+		#This line does one large API call for the specified APP ID, data to be parsed below 
+		rawappdata=$(curl -H "Accept: text/xml" -sfku "${apiuser}:${apipass}" "${jssurl}/JSSResource/mobiledeviceapplications/id/${id}")
+
+		#Targeted Section 
+
+		#Determines Application Name 
+		appname=$(echo $rawappdata | xpath /mobile_device_application/general/name 2>/dev/null | awk -F'>|<' '{print $3}' | tr -d “,”)
+		#Echo out app name so .app knows status
+		echo "Collecting info on $appname"
+		#Determines if the App is scoped to all mobile devices 
+		scopeallmob=$(echo $rawappdata | xpath /mobile_device_application/scope 2>/dev/null | awk -F'<all_mobile_devices>|</all_mobile_devices>' '{print $2}' | tr -d “,”)
+		#Determines if the App is scoped to all Users
+		scopeallusers=$(echo $rawappdata | xpath /mobile_device_application/scope 2>/dev/null | awk -F'<all_jss_users>|</all_jss_users>' '{print $2}' | tr -d “,”)
+		#Determines what specific devices the app has been scoped to 
+		scopedmobildevices=$(echo $rawappdata | xpath /mobile_device_application/scope/mobile_devices/mobile_device/id 2>/dev/null | sed 's$</id>$ / $g' | sed 's$<id>$$g' | tr -d “,”)
+		#Determines what groups the app has been scoped to 
+		scopedmobiledevicegroups=$(echo $rawappdata | xpath /mobile_device_application/scope/mobile_device_groups/mobile_device_group/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what JSS user groups the app has been scoped to
+		scopedusergroups=$(echo $rawappdata | xpath /mobile_device_application/scope/jss_user_groups/user_group/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what JSS (Can be LDAP) users the app has been scoped to
+		scopedusers=$(echo $rawappdata | xpath /mobile_device_application/scope/jss_users/user/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what Buildings the App has been scoped to 
+		scopedbuilding=$(echo $rawappdata | xpath /mobile_device_application/scope/buildings/building/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what Departments the App has been scoped to 
+		scopeddepartment=$(echo $rawappdata | xpath /mobile_device_application/scope/departments/department/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+
+		#Limitations Section
+
+		#Determines what JSS (Can be LDAP) users the app has been limited to
+		limiteduser=$(echo $rawappdata | xpath /mobile_device_application/scope/limitations/users/user/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what network segments the App has been limited to 
+		limitednetworksegment=$(echo $rawappdata | xpath /mobile_device_application/scope/limitations/network_segments/network_segment/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what Jamf User groups the app has been limited to 
+		limitedusergroup=$(echo $rawappdata | xpath /mobile_device_application/scope/limitations/user_groups/user_group/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+
+		#Exclusions Section
+
+		#Determines what specific mobile devices have been excluded 
+		excludedmobildevices=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/mobile_devices/mobile_device/id 2>/dev/null | sed 's$</id>$ / $g' | sed 's$<id>$$g' | tr -d “,”)
+		#Determines waht mobile device groups have been excluded 
+		excludedmobiledevicegroups=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/mobile_device_groups/mobile_device_group/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what JSS user groups have been excluded
+		excludedusergroups=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/jss_user_groups/user_group/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines waht JSS (Can be LDAP) users have been excluded 
+		excludedusers=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/jss_users/user/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what buildings have been excluded
+		excludedbuilding=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/buildings/building/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what departments have been excluded
+		excludeddepartment=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/departments/department/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines what network segments have been excluded
+		excludednetworksegment=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/network_segments/network_segment/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determs what LDAP/Local users have been excluded
+		excludedldap1localuser=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/users/user/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+		#Determines waht LDAP Groups have been excluded
+		excludedldapgroup=$(echo $rawappdata | xpath /mobile_device_application/scope/exclusions/user_groups/user_group/name 2>/dev/null | sed 's$</name>$ / $g' | sed 's$<name>$$g' | tr -d “,”)
+
+		#This line outputs the array result to the pre-created CSV item
+		echo "$appname,$scopeallmob,$scopeallusers,$scopedmobildevices,$scopedmobiledevicegroups,$scopedusergroups,$scopedusers,$scopedbuilding,$scopeddepartment,$limiteduser,$limitednetworksegment,$limitedusergroup,$excludedmobildevices,$excludedmobiledevicegroups,$excludedusergroups,$excludedusers,$excludedbuilding,$excludeddepartment,$excludednetworksegment,$excludedldap1localuser,$excludedldapgroup" >> $csvfile
+
+		done
+		
+echo "Opening CSV file"
+open $csvfile
+
+else
+	echo "Jamf Pro URL or User credentials are invalid. Please try again."	
+	
+	error=$(/usr/bin/osascript<<END
+	tell application "System Events"
+	activate
+	set the answer to button returned of (display dialog "Jamf Pro URL or User credentials are invalid. Please try again." with title "Unauthorized" buttons {"OK"} default button 1)
+	end tell
+END)
+fi
+	
+
+exit 0
