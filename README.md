@@ -3,7 +3,7 @@ This tool was created to allow a Jamf Pro administrator to export a CSV containg
 
 
 
-## How do I use it?
+# How do I use it?
 
 Follow the wiki [here](https://github.com/nickthemacguy/Jamf-iOS-App-Info-Tool/wiki/Getting-Started)
 
