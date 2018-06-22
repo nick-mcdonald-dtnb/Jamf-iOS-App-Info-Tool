@@ -71,11 +71,11 @@ checkauth=$(curl -w '%{http_code}' -su "${apiuser}:${apipass}" -H "Accept: text/
 #Checks if credentials are authorized
 authstatus=$(echo "$checkauth" | sed 's/.*\(...\)/\1/' 2>/dev/null)
 
-#Curls down the entire Mobile Device Application catalog from the Jamf Pro Server
-rawapplist=$(curl -H "Accept: text/xml" -sfku "${apiuser}:${apipass}" "${jssurl}/JSSResource/mobiledeviceapplications")
-
 if [[ "$authstatus" = "200" ]]; then
 	echo "User permissions verified, colleting information. Please wait."	
+	
+		#Curls down the entire Mobile Device Application catalog from the Jamf Pro Server
+		rawapplist=$(curl -H "Accept: text/xml" -sfku "${apiuser}:${apipass}" "${jssurl}/JSSResource/mobiledeviceapplications")
 
 		#This xpaths out the ID's of all apps to be loaded into the array 
 		xpathed=$(echo "$rawapplist" | xpath /mobile_device_applications/mobile_device_application/id 2>/dev/null)
