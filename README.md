@@ -11,5 +11,7 @@ Follow the wiki [here](https://github.com/nickthemacguy/Jamf-iOS-App-Info-Tool/w
 
 
 
+
+#
 Thanks to sveinbjornt and his work on Platypus ( Which is used here to turn the .sh Bash script into an easy to use Mac application)
 Check out platypus [here](https://github.com/sveinbjornt/Platypus)
